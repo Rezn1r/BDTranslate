@@ -24,12 +24,11 @@
 
 		<section id="translator" class="py-5">
 			<div class="container">
-				<div class="row g-4">
-					<div class="col-lg-5">
-						<h2 class="fw-bold">BDTranslate</h2>
-						<p class="text-muted">
-							Drop a file or paste a .lang file below to preview the translated output.
-							This is a static demo UI for the product concept.
+				<div class="row justify-content-center">
+					<div class="col-lg-7">
+						<h2 class="fw-bold text-center">BDTranslate</h2>
+						<p class="text-muted text-center">
+							Drop a file or paste a .lang file below, then translate when ready.
 						</p>
 						<div class="upload-card p-4 mt-4">
 							<div class="d-flex align-items-center gap-3">
@@ -55,6 +54,11 @@
 								placeholder="app.title=BDTranslate"
 							></textarea>
 						</div>
+						<div class="d-flex flex-column flex-sm-row gap-2 mt-4">
+							<button id="translate-btn" class="btn btn-primary">Translate</button>
+							<button id="download-zip" class="btn btn-outline-secondary">Download zip</button>
+						</div>
+						<div id="status-text" class="small text-muted mt-2"></div>
 						<div class="mt-4">
 							<label class="form-label">Translate to</label>
 							<div class="d-flex flex-wrap gap-2 mb-2">
@@ -240,26 +244,6 @@
 								</div>
 							</div>
 						</div>
-					</div>
-					<div class="col-lg-7">
-						<div class="card border-0 shadow-sm h-100">
-							<div class="card-header bg-white border-0">
-								<div class="d-flex justify-content-between align-items-center">
-									<div>
-										<h6 class="mb-0">Preview output</h6>
-										<small class="text-muted">Translation appears here</small>
-									</div>
-									<button id="download-zip" class="btn btn-outline-secondary btn-sm">Download</button>
-								</div>
-							</div>
-							<div class="card-body">
-								<textarea id="output-preview" class="form-control preview-text" rows="12" readonly>
-bd.title=BDTranslate
-bd.description=Language File Translator
-								</textarea>
-							</div>
-						</div>
-					</div>
 				</div>
 			</div>
 		</section>

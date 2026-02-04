@@ -119,11 +119,36 @@ const formatLangOutput = lines =>
 		})
 		.join("\n");
 
+const translateBatch = async (values, targetLang) => {
+	if (!values.length) {
+		return [];
+	}
+	const delimiter = "___BDT_SEP_9F3A___";
+	const combined = values.join(`\n${delimiter}\n`);
+	try {
+		const translatedText = await translate(combined, "auto", targetLang);
+		const parts = translatedText.split(delimiter);
+		if (parts.length === values.length) {
+			return parts.map(part => part.trim());
+		}
+	} catch (error) {
+		// fall through to per-line translation
+	}
+
+	const results = await Promise.all(
+		values.map(value => translate(value, "auto", targetLang).catch(() => value))
+	);
+	return results;
+};
+
 const translateEntries = async (lines, targetLocale) => {
 	const targetLang = localeMap[targetLocale] || "en";
 	const translated = [];
+	const entryIndices = [];
+	const values = [];
 
-	for (const line of lines) {
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index];
 		if (line.type !== "entry") {
 			translated.push(line);
 			continue;
@@ -132,12 +157,19 @@ const translateEntries = async (lines, targetLocale) => {
 			translated.push(line);
 			continue;
 		}
-		try {
-			const translatedValue = await translate(line.core, "auto", targetLang);
-			translated.push({ ...line, core: translatedValue });
-		} catch (error) {
-			translated.push(line);
-		}
+		translated.push(line);
+		entryIndices.push(index);
+		values.push(line.core);
+	}
+
+	const translatedValues = await translateBatch(values, targetLang);
+	for (let i = 0; i < entryIndices.length; i += 1) {
+		const lineIndex = entryIndices[i];
+		const translatedValue = translatedValues[i];
+		translated[lineIndex] = {
+			...translated[lineIndex],
+			core: translatedValue ?? translated[lineIndex].core
+		};
 	}
 
 	return translated;
@@ -157,43 +189,43 @@ let lastTranslatedText = "";
 let lastSourceText = "";
 
 const updatePreview = async rawText => {
-	const output = document.getElementById("output-preview");
-	if (!output) {
+	const statusText = document.getElementById("status-text");
+	if (!statusText) {
 		return;
 	}
-	output.value = "Parsing...";
+	statusText.textContent = "Parsing...";
 	const entries = parseLangFile(rawText);
 	const selectedLocales = getSelectedLocales();
 	lastSourceText = rawText;
 
 	if (!entries.some(line => line.type === "entry")) {
-		output.value = "No valid .lang entries found.";
+		statusText.textContent = "No valid .lang entries found.";
 		lastTranslatedText = "";
 		lastSourceText = "";
 		return;
 	}
 
 	if (!selectedLocales.length) {
-		output.value = "Select at least one target locale.";
+		statusText.textContent = "Select at least one target locale.";
 		lastTranslatedText = "";
 		lastSourceText = rawText;
 		return;
 	}
 
-	output.value = `Translating 0/${selectedLocales.length} locales (0%)...`;
-	const outputs = [];
-	for (let index = 0; index < selectedLocales.length; index += 1) {
-		const locale = selectedLocales[index];
-		const percent = Math.round((index / selectedLocales.length) * 100);
-		output.value = `Translating ${index}/${selectedLocales.length} locales (${percent}%)...`;
+	statusText.textContent = `Translating 0/${selectedLocales.length} locales (0%)...`;
+	let completed = 0;
+	const tasks = selectedLocales.map(async locale => {
 		const translatedEntries = await translateEntries(entries, locale);
 		const formatted = formatLangOutput(translatedEntries);
-		outputs.push({ locale, text: formatted });
-	}
-	output.value = `Translating ${selectedLocales.length}/${selectedLocales.length} locales (100%)...`;
+		completed += 1;
+		const percent = Math.round((completed / selectedLocales.length) * 100);
+		statusText.textContent = `Translating ${completed}/${selectedLocales.length} locales (${percent}%)...`;
+		return { locale, text: formatted };
+	});
+	const outputs = await Promise.all(tasks);
 
 	lastTranslatedText = outputs.map(item => `# ${item.locale}\n${item.text}`).join("\n\n");
-	output.value = lastTranslatedText;
+	statusText.textContent = "Translation complete.";
 };
 
 const handleFile = async file => {
@@ -217,8 +249,10 @@ document.addEventListener("DOMContentLoaded", () => {
 	const downloadButton = document.getElementById("download-zip");
 	const selectAllButton = document.getElementById("select-all");
 	const deselectAllButton = document.getElementById("deselect-all");
+	const translateButton = document.getElementById("translate-btn");
+	const statusText = document.getElementById("status-text");
 
-	if (!dropZone || !fileInput || !chooseButton || !pasteInput || !targetLocales || !downloadButton || !selectAllButton || !deselectAllButton) {
+	if (!dropZone || !fileInput || !chooseButton || !pasteInput || !targetLocales || !downloadButton || !selectAllButton || !deselectAllButton || !translateButton || !statusText) {
 		return;
 	}
 
@@ -239,67 +273,54 @@ document.addEventListener("DOMContentLoaded", () => {
 		handleFile(file);
 	});
 
-	pasteInput.addEventListener("input", () => updatePreview(pasteInput.value));
-	targetLocales.addEventListener("change", () => {
-		if (pasteInput.value.trim()) {
-			updatePreview(pasteInput.value);
-		}
-	});
+	translateButton.addEventListener("click", () => updatePreview(pasteInput.value));
 
 	selectAllButton.addEventListener("click", () => {
 		const checkboxes = targetLocales.querySelectorAll("input[type='checkbox']");
 		checkboxes.forEach(checkbox => (checkbox.checked = true));
-		if (pasteInput.value.trim()) {
-			updatePreview(pasteInput.value);
-		}
 	});
 
 	deselectAllButton.addEventListener("click", () => {
 		const checkboxes = targetLocales.querySelectorAll("input[type='checkbox']");
 		checkboxes.forEach(checkbox => (checkbox.checked = false));
-		const output = document.getElementById("output-preview");
-		if (output) {
-			output.value = "Select at least one target locale.";
-		}
+		statusText.textContent = "Select at least one target locale.";
 	});
 
 	downloadButton.addEventListener("click", async () => {
 		if (!lastTranslatedText.trim()) {
-			const output = document.getElementById("output-preview");
-			output.value = "Translate something first to download.";
+			statusText.textContent = "Translate something first to download.";
 			return;
 		}
 		if (typeof JSZip === "undefined") {
-			const output = document.getElementById("output-preview");
-			output.value = "Zip library not loaded. Refresh the page.";
+			statusText.textContent = "Zip library not loaded. Refresh the page.";
 			return;
 		}
 
 		const selectedLocales = getSelectedLocales();
 		if (!selectedLocales.length) {
-			const output = document.getElementById("output-preview");
-			output.value = "Select at least one target locale.";
+			statusText.textContent = "Select at least one target locale.";
 			return;
 		}
 		if (!lastSourceText.trim()) {
-			const output = document.getElementById("output-preview");
-			output.value = "Translate something first to download.";
+			statusText.textContent = "Translate something first to download.";
 			return;
 		}
 
 		const originalLabel = downloadButton.textContent;
 		downloadButton.disabled = true;
-		downloadButton.textContent = "Zipping 0%";
+		downloadButton.textContent = "Zipping (this might take a while)...";
 
+		const baseEntries = parseLangFile(lastSourceText);
 		const zip = new JSZip();
-		for (const locale of selectedLocales) {
-			const translatedEntries = await translateEntries(
-				parseLangFile(lastSourceText),
-				locale
-			);
+		let completed = 0;
+		const tasks = selectedLocales.map(async locale => {
+			const translatedEntries = await translateEntries(baseEntries, locale);
 			const text = formatLangOutput(translatedEntries);
+			completed += 1;
+			statusText.textContent = `Preparing files ${completed}/${selectedLocales.length}...`;
 			zip.file(`${locale}.lang`, text);
-		}
+		});
+		await Promise.all(tasks);
 		const languagesJson = JSON.stringify(selectedLocales, null, 4);
 		const languageNamesJson = JSON.stringify(
 			selectedLocales.map(locale => [locale, languageNames[locale] || locale]),
@@ -310,10 +331,11 @@ document.addEventListener("DOMContentLoaded", () => {
 		zip.file("language_names.json", languageNamesJson);
 		const blob = await zip.generateAsync({ type: "blob" }, metadata => {
 			const percent = Math.round(metadata.percent);
-			downloadButton.textContent = `Zipping ${percent}%`;
+			downloadButton.textContent = `Zipping (this might take a while)...`;
 		});
 		saveAs(blob, "translation.zip");
 		downloadButton.disabled = false;
 		downloadButton.textContent = originalLabel;
+		statusText.textContent = "Zip downloaded.";
 	});
 });
